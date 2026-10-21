@@ -1,0 +1,52 @@
+name: 每日更新直播源（12:00 / 24:00）
+
+on:
+  schedule:
+    # 每天两次，UTC 时间（UTC + 8 = 北京时间）
+    #   UTC 04:00 -> 北京时间 12:00
+    #   UTC 16:00 -> 北京时间 24:00（即次日 00:00）
+    - cron: '0 4,16 * * *'
+  workflow_dispatch:      # 允许在网页上手动点一下立即运行
+  push:
+    paths:
+      - 'gen_multi.py'   # 改了生成脚本就立刻重建
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 准备 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 生成源
+        run: |
+          python gen_multi.py --out .
+          mv 央卫视直播源.m3u tv.m3u
+          mv 央卫视直播源.txt tv.txt
+
+      - name: 自检（不允许出现 IPv6）
+        run: |
+          if grep -qE '\[[0-9a-fA-F]{0,4}(:[0-9a-fA-F]{0,4}){2,}\]' tv.m3u; then
+            echo "发现 IPv6 地址，拒绝提交"
+            exit 1
+          fi
+
+      - name: 有变化才提交
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- tv.m3u tv.txt; then
+            git add tv.m3u tv.txt
+            git commit -m "chore: 自动更新直播源 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+            echo "已更新"
+          else
+            echo "内容无变化，跳过提交"
+          fi
